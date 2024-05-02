@@ -1,4 +1,4 @@
-module github.intuit.com/gdanko/netspeed
+module github.com/gdanko/netspeed
 
 go 1.22.1
 

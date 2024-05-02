@@ -10,22 +10,24 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gdanko/netspeed/globals"
+
 	flags "github.com/jessevdk/go-flags"
 	"github.com/shirou/gopsutil/net"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/sys/unix"
 )
 
-const VERSION = "0.1.1"
+const VERSION = "0.2.0"
 
-type NetspeedData struct {
-	Timestamp   uint64  `json:"timestamp"`
-	Interface   string  `json:"interface"`
-	KBytesRecv  float64 `json:"kbytes_recv"`
-	KBytesSent  float64 `json:"kbytes_sent"`
-	PacketsRecv uint64  `json:"packets_recv"`
-	PacketsSent uint64  `json:"packets_sent"`
-}
+// type NetspeedData struct {
+// 	Timestamp   uint64  `json:"timestamp"`
+// 	Interface   string  `json:"interface"`
+// 	KBytesRecv  float64 `json:"kbytes_recv"`
+// 	KBytesSent  float64 `json:"kbytes_sent"`
+// 	PacketsRecv uint64  `json:"packets_recv"`
+// 	PacketsSent uint64  `json:"packets_sent"`
+// }
 
 type Options struct {
 	ListInterfaces bool   `short:"l" long:"list" description:"Display a list of interfaces and exit"`
@@ -185,7 +187,7 @@ func main() {
 			panic(err)
 		}
 
-		netspeedData := NetspeedData{
+		netspeedData := globals.NetspeedData{
 			Timestamp:   getTimestamp(),
 			Interface:   interfaceName,
 			KBytesSent:  (newBytesSent - oldBytesSent) / 1024,
