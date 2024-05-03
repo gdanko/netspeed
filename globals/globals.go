@@ -1,6 +1,9 @@
 package globals
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 type Options struct {
 	ListInterfaces bool   `short:"l" long:"list" description:"Display a list of interfaces and exit"`
@@ -30,6 +33,7 @@ var (
 	interfaceList []string
 	interfaceName string
 	mu            sync.RWMutex
+	exitNetspeed  context.CancelFunc
 	outputFile    string
 	pid           int
 	pidFile       string
@@ -96,6 +100,19 @@ func SetInterfaceList(x []string) {
 func GetInterfaceList() (x []string) {
 	mu.Lock()
 	x = interfaceList
+	mu.Unlock()
+	return x
+}
+
+func SetExitNetspeed(x context.CancelFunc) {
+	mu.Lock()
+	exitNetspeed = x
+	mu.Unlock()
+}
+
+func GetExitNetspeed() (x context.CancelFunc) {
+	mu.Lock()
+	x = exitNetspeed
 	mu.Unlock()
 	return x
 }
