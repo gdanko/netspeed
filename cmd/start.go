@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gdanko/netspeed/globals"
@@ -33,7 +35,6 @@ func init() {
 }
 
 func startPreRunCmd(cmd *cobra.Command, args []string) error {
-	fmt.Println(111)
 	// Determine the home directory
 	homeDir, err = util.GetHomeDir()
 	if err != nil {
@@ -84,23 +85,25 @@ func startPreRunCmd(cmd *cobra.Command, args []string) error {
 }
 
 func startRunCmd(cmd *cobra.Command, args []string) error {
-	// sigChan := make(chan os.Signal, 1)
-	// signal.Notify(sigChan,
-	// 	syscall.SIGINT,
-	// 	syscall.SIGQUIT,
-	// 	syscall.SIGTERM,
-	// )
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan,
+		syscall.SIGINT,
+		syscall.SIGQUIT,
+		syscall.SIGTERM,
+	)
 
-	// go func() {
-	// 	sig := <-sigChan
-	// 	fmt.Println("Received signal:", sig)
-	// 	util.ExitCleanly()
-	// }()
+	go func() {
+		sig := <-sigChan
+		fmt.Println("Received signal:", sig)
+		util.ExitCleanly()
+	}()
 
 	err = util.CreatePidFile()
 	if err != nil {
 		util.ExitOnError(err.Error())
 	}
+	fmt.Println(999)
+	os.Exit(0)
 
 	iostatDataOld, err := iostat.GetData()
 	if err != nil {
