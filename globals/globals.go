@@ -10,6 +10,9 @@ type Options struct {
 	InterfaceName  string `short:"i" long:"interface" description:"The name of the network interface to use, e.g., en0" required:"false"`
 	OutputFile     string `short:"o" long:"outfile" description:"Location of the JSON output file - output will not be written to screen" required:"false"`
 	Version        func() `short:"V" long:"version" description:"Print program version"`
+	Args           struct {
+		Stop bool `positional-args:"yes" required:"no"`
+	}
 }
 
 type NetspeedData struct {
@@ -30,6 +33,7 @@ type IOStatsData struct {
 }
 
 var (
+	homeDir       string
 	interfaceList []string
 	interfaceName string
 	mu            sync.RWMutex
@@ -113,6 +117,19 @@ func SetExitNetspeed(x context.CancelFunc) {
 func GetExitNetspeed() (x context.CancelFunc) {
 	mu.Lock()
 	x = exitNetspeed
+	mu.Unlock()
+	return x
+}
+
+func SetHomeDir(x string) {
+	mu.Lock()
+	homeDir = x
+	mu.Unlock()
+}
+
+func GetHomeDir() (x string) {
+	mu.Lock()
+	x = homeDir
 	mu.Unlock()
 	return x
 }

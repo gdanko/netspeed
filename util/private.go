@@ -8,7 +8,6 @@ import (
 
 	"github.com/gdanko/netspeed/globals"
 	"github.com/mitchellh/go-ps"
-	"golang.org/x/sys/unix"
 )
 
 func verifyProcess() (err error) {
@@ -27,7 +26,7 @@ func verifyProcess() (err error) {
 
 		// pidfile exists but no process found
 		if process == nil {
-			err = deleteFile(globals.GetPidFile())
+			err = DeleteFile(globals.GetPidFile())
 			if err != nil {
 				return err
 			}
@@ -41,32 +40,10 @@ func verifyProcess() (err error) {
 	return nil
 }
 
-func pathExistsAndIsWritable(path string) (err error) {
-	_, err = os.Stat(path)
-	if os.IsNotExist(err) {
-		return fmt.Errorf("the path \"%s\" does not exist - please choose another path", path)
-	}
-	ok := unix.Access(path, unix.W_OK)
-	if ok != nil {
-		return fmt.Errorf("the path \"%s\" is not writable - please choose another path", path)
-	}
-	return nil
-}
-
 func fileExists(path string) (exists bool) {
 	_, err := os.Stat(path)
 	if os.IsNotExist(err) {
 		return false
 	}
 	return true
-}
-
-func deleteFile(filename string) (err error) {
-	if fileExists(filename) {
-		err = os.Remove(filename)
-		if err != nil {
-			return fmt.Errorf("failed to remove the pidfile \"%s\", %s", filename, err)
-		}
-	}
-	return nil
 }
