@@ -27,7 +27,7 @@ func verifyProcess() (err error) {
 
 		// pidfile exists but no process found
 		if process == nil {
-			err = DeletePidFile()
+			err = deleteFile(globals.GetPidFile())
 			if err != nil {
 				return err
 			}
@@ -59,4 +59,14 @@ func fileExists(path string) (exists bool) {
 		return false
 	}
 	return true
+}
+
+func deleteFile(filename string) (err error) {
+	if fileExists(filename) {
+		err = os.Remove(filename)
+		if err != nil {
+			return fmt.Errorf("failed to remove the pidfile \"%s\", %s", filename, err)
+		}
+	}
+	return nil
 }

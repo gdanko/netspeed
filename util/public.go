@@ -11,11 +11,10 @@ import (
 	"time"
 
 	"github.com/gdanko/netspeed/globals"
-	"github.com/gdanko/netspeed/output"
 	flags "github.com/jessevdk/go-flags"
 )
 
-func ProcessOptions(opts globals.Options, interfaceList []string) (err error) {
+func ProcessOptions(opts globals.Options) (err error) {
 	parser := flags.NewParser(&opts, flags.Default)
 	parser.Usage = `--interface <interface_name> --outfile </path/to/output.json>
   netspeed calculates KiB in/out per second and writes the output to a JSON file.`
@@ -28,7 +27,11 @@ func ProcessOptions(opts globals.Options, interfaceList []string) (err error) {
 	}
 
 	if opts.ListInterfaces {
-		output.ShowAvailableInterfaces()
+		fmt.Println("Available Interfaces:")
+		for _, interfaceName := range globals.GetInterfaceList() {
+			fmt.Printf("  %s\n", interfaceName)
+		}
+		ExitCleanly()
 	}
 
 	if opts.InterfaceName == "" {
@@ -38,6 +41,11 @@ func ProcessOptions(opts globals.Options, interfaceList []string) (err error) {
 	if opts.OutputFile != "" {
 		var path = ""
 		if strings.Contains(opts.OutputFile, "/") {
+			absPath, err := filepath.Abs(opts.OutputFile)
+			if err != nil {
+				return fmt.Errorf("unable to determine the absolute path for \"%s\"", opts.OutputFile)
+			}
+			opts.OutputFile = absPath
 			path = filepath.Dir(opts.OutputFile)
 		} else {
 			path, err = os.Getwd()
@@ -52,7 +60,7 @@ func ProcessOptions(opts globals.Options, interfaceList []string) (err error) {
 	}
 
 	// Test the interface
-	if !slices.Contains(interfaceList, opts.InterfaceName) {
+	if !slices.Contains(globals.GetInterfaceList(), opts.InterfaceName) {
 		return fmt.Errorf("the specified interface \"%s\" does not exist", opts.InterfaceName)
 	}
 	globals.SetInterfaceName(opts.InterfaceName)
@@ -77,16 +85,6 @@ func GetPidFilename(homeDir string) (pidfile string) {
 	return filepath.Join(homeDir, ".netspeed.pid")
 }
 
-func DeletePidFile() (err error) {
-	if fileExists(globals.GetPidFile()) {
-		err = os.Remove(globals.GetPidFile())
-		if err != nil {
-			return fmt.Errorf("failed to remove the pidfile \"%s\", %s", globals.GetPidFile(), err)
-		}
-	}
-	return nil
-}
-
 func CreatePidFile() (err error) {
 	if fileExists(globals.GetPidFile()) {
 		err = verifyProcess()
@@ -102,24 +100,30 @@ func CreatePidFile() (err error) {
 }
 
 func ExitCleanly() {
-	err := DeletePidFile()
-	if err != nil {
-		fmt.Println(err)
-		fmt.Println("please delete it manually")
+	Exit("")
+}
+
+func ExitOnError(errorMessage string) {
+	Exit(errorMessage)
+}
+
+func Exit(errorMessage string) {
+	var err error
+
+	globals.GetExitNetspeed()
+	time.Sleep(500 * time.Millisecond)
+
+	for _, filename := range []string{globals.GetPidFile(), globals.GetOutputFile()} {
+		err = deleteFile(filename)
+		if err != nil {
+			fmt.Println(err)
+			fmt.Println("please delete it manually")
+		}
+	}
+
+	if errorMessage != "" {
+		fmt.Println(errorMessage)
 		os.Exit(1)
 	}
 	os.Exit(0)
-}
-
-func ExitOnError(message string) {
-	err := DeletePidFile()
-	if err != nil {
-		fmt.Println(err)
-		fmt.Println("please delete it manually")
-		os.Exit(1)
-	}
-	if message != "" {
-		fmt.Println(message)
-	}
-	os.Exit(1)
 }
