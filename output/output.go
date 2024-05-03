@@ -24,11 +24,3 @@ func ProcessOutput(netspeedData globals.NetspeedData) {
 		}
 	}
 }
-
-func ShowAvailableInterfaces() {
-	fmt.Println("Available Interfaces:")
-	for _, interfaceName := range globals.GetInterfaceList() {
-		fmt.Printf("  %s\n", interfaceName)
-	}
-	util.ExitCleanly()
-}
