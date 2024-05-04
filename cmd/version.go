@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/gdanko/netspeed/internal"
 	"github.com/spf13/cobra"
-	"github.intuit.com/gdanko/netspeed/internal"
 )
 
 var (
@@ -22,7 +22,7 @@ func init() {
 }
 
 func runVersionCmd(cmd *cobra.Command, args []string) error {
-	fmt.Fprintf(cmd.OutOrStdout(), "%s\n", internal.Version(true, true))
+	fmt.Fprintf(cmd.OutOrStdout(), "netspeed %s\n", internal.Version(true, true))
 
 	return nil
 }
