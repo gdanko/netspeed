@@ -102,8 +102,6 @@ func startRunCmd(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		util.ExitOnError(err.Error())
 	}
-	fmt.Println(999)
-	os.Exit(0)
 
 	iostatDataOld, err := iostat.GetData()
 	if err != nil {
