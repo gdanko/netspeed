@@ -57,8 +57,8 @@ func (c *Config) init(args []string) error {
 
 	opts = Options{}
 	parser = flags.NewParser(&opts, flags.Default)
-	parser.Usage = `--interface <interface_name> [--outfile </path/to/output.json>] [--list]
-  netspeed prints kilobytes in/out per second and packets sent/received per seconds for a given interface`
+	parser.Usage = `[-j, --json] [-V, --version] 
+  netspeed prints kilobytes in/out per second and packets sent/received per second for all interfaces`
 	if _, err := parser.Parse(); err != nil {
 		if flagsErr, ok := err.(*flags.Error); ok && flagsErr.Type == flags.ErrHelp {
 			os.Exit(0)
