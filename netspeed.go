@@ -22,15 +22,13 @@ import (
 	flags "github.com/jessevdk/go-flags"
 )
 
-const defaultTick = 1 * time.Second
-
 type Config struct {
 	InterfaceName  string
 	OutputFile     string
 	ListInterfaces bool
 	PrintVersion   bool
 	InterfaceList  []string
-	Tick           time.Duration
+	Lockfile       string
 }
 
 type Options struct {
@@ -40,13 +38,21 @@ type Options struct {
 	PrintVersion   bool   `short:"V" long:"version" description:"Print program version"`
 }
 
-type NetspeedData struct {
-	Timestamp   uint64  `json:"timestamp"`
+type NetspeedInterfaceData struct {
 	Interface   string  `json:"interface"`
 	KBytesRecv  float64 `json:"kbytes_recv"`
 	KBytesSent  float64 `json:"kbytes_sent"`
 	PacketsRecv uint64  `json:"packets_recv"`
 	PacketsSent uint64  `json:"packets_sent"`
+}
+
+type NetspeedData struct {
+	Timestamp  uint64                  `json:"timestamp"`
+	Interfaces []NetspeedInterfaceData `json:"interfaces"`
+}
+
+type IOStatData struct {
+	Interfaces []iostat.IOStatData `json:"interfaces"`
 }
 
 func (c *Config) init(args []string) error {
@@ -58,7 +64,7 @@ func (c *Config) init(args []string) error {
 	opts = Options{}
 	parser = flags.NewParser(&opts, flags.Default)
 	parser.Usage = `--interface <interface_name> [--outfile </path/to/output.json>] [--list]
-  netspeed calculates KiB in/out per second and optionally writes the output to a JSON file.`
+  netspeed prints kilobytes in/out per second and packets sent/received per seconds for a given interface`
 	if _, err := parser.Parse(); err != nil {
 		if flagsErr, ok := err.(*flags.Error); ok && flagsErr.Type == flags.ErrHelp {
 			os.Exit(0)
@@ -76,6 +82,7 @@ func (c *Config) init(args []string) error {
 	c.OutputFile = opts.OutputFile
 	c.ListInterfaces = opts.ListInterfaces
 	c.PrintVersion = opts.PrintVersion
+	c.Lockfile = filepath.Join(os.TempDir(), "netspeed.lock")
 
 	return nil
 }
@@ -87,6 +94,16 @@ func (c *Config) ExitError(errorMessage string) {
 
 func (c *Config) ExitCleanly() {
 	os.Exit(0)
+}
+
+func (c *Config) CreateLockfile() (err error) {
+	f, err := os.Create(c.Lockfile)
+	if err != nil {
+		return fmt.Errorf("failed to create the lockfile \"%s\"", c.Lockfile)
+	}
+	defer f.Close()
+
+	return nil
 }
 
 func (c *Config) PopulateInterfaces() (err error) {
@@ -166,18 +183,47 @@ func (c *Config) ProcessOutput(netspeedData NetspeedData) {
 }
 
 func (c *Config) CleanUp() (err error) {
-	err = util.DeleteFile(c.OutputFile)
-	if err != nil {
-		return err
+	for _, filename := range []string{c.OutputFile, c.Lockfile} {
+		err = util.DeleteFile(filename)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+		}
 	}
 	return nil
 }
 
+func (c *Config) FindInterface(interfaceName string, interfaceList []iostat.IOStatData) (iostatEntry iostat.IOStatData, err error) {
+	for _, iostatEntry = range interfaceList {
+		if interfaceName == iostatEntry.Interface {
+			return iostatEntry, nil
+		}
+	}
+	return iostat.IOStatData{}, fmt.Errorf("the interface \"%s\" was not found in this block", interfaceName)
+}
+
 func Run(ctx context.Context, c *Config, out io.Writer) error {
+	var iostatDataOld = IOStatData{}
+	var iostatDataNew = IOStatData{}
+	var netspeedData = NetspeedData{}
+
+	if util.FileExists(c.Lockfile) {
+		return fmt.Errorf("the lockfile \"%s\" already exists - the program is probably already running", c.Lockfile)
+	}
+
+	err := c.CreateLockfile()
+	if err != nil {
+		return err
+	}
+
 	log.SetOutput(out)
 
-	var oldBytesSent, oldBytesRecv, newBytesSent, newBytesRecv float64 = 0, 0, 0, 0
-	var oldPacketsSent, oldPacketsRecv, newPacketsSent, newPacketsRecv uint64 = 0, 0, 0, 0
+	// Get the first sample
+	data, err := iostat.GetData()
+	if err != nil {
+		c.ExitError(err.Error())
+	}
+	iostatDataOld.Interfaces = data
+	time.Sleep(1 * time.Second)
 
 	for {
 		select {
@@ -185,35 +231,42 @@ func Run(ctx context.Context, c *Config, out io.Writer) error {
 			return nil
 		// case <-time.Tick(c.Tick):
 		default:
-			iostatDataNew, err := iostat.GetData()
+			// Clear out New at each iteration
+			netspeedData = NetspeedData{
+				Timestamp: util.GetTimestamp(),
+			}
+
+			data, err := iostat.GetData()
 			if err != nil {
 				c.ExitError(err.Error())
 			}
-			for _, iostatBlock := range iostatDataNew {
-				if iostatBlock.Interface == c.InterfaceName {
-					newBytesSent = iostatBlock.BytesSent
-					newBytesRecv = iostatBlock.BytesRecv
-					newPacketsSent = iostatBlock.PacketsSent
-					newPacketsRecv = iostatBlock.PacketsRecv
+			iostatDataNew.Interfaces = data
+
+			for _, iostatBlock := range iostatDataNew.Interfaces {
+				interfaceName := iostatBlock.Interface
+				interfaceOld, err := c.FindInterface(interfaceName, iostatDataOld.Interfaces)
+				if err != nil {
+					c.ExitError(err.Error())
 				}
-			}
-			netspeedData := NetspeedData{
-				Timestamp:   util.GetTimestamp(),
-				Interface:   c.InterfaceName,
-				KBytesSent:  (newBytesSent - oldBytesSent) / 1024,
-				KBytesRecv:  (newBytesRecv - oldBytesRecv) / 1024,
-				PacketsSent: newPacketsSent - oldPacketsSent,
-				PacketsRecv: newPacketsRecv - oldPacketsRecv,
+
+				interfaceNew, err := c.FindInterface(interfaceName, iostatDataNew.Interfaces)
+				if err != nil {
+					c.ExitError(err.Error())
+				}
+
+				netspeedData.Interfaces = append(netspeedData.Interfaces, NetspeedInterfaceData{
+					Interface:   interfaceNew.Interface,
+					KBytesSent:  (interfaceNew.BytesSent - interfaceOld.BytesSent) / 1024,
+					KBytesRecv:  (interfaceNew.BytesRecv - interfaceOld.BytesRecv) / 1024,
+					PacketsSent: interfaceNew.PacketsSent - interfaceOld.PacketsSent,
+					PacketsRecv: interfaceNew.PacketsRecv - interfaceOld.PacketsRecv,
+				})
 			}
 
 			c.ProcessOutput(netspeedData)
 
-			oldBytesSent = newBytesSent
-			oldBytesRecv = newBytesRecv
-			oldPacketsSent = newPacketsSent
-			oldPacketsRecv = newPacketsRecv
+			iostatDataOld.Interfaces = iostatDataNew.Interfaces
 			time.Sleep(1 * time.Second)
-
 		}
 	}
 }

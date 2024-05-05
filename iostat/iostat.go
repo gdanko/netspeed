@@ -6,7 +6,7 @@ import (
 	"github.com/shirou/gopsutil/net"
 )
 
-type IOStatsData struct {
+type IOStatData struct {
 	Interface   string  `json:"interface"`
 	BytesRecv   float64 `json:"bytes_recv"`
 	BytesSent   float64 `json:"bytes_sent"`
@@ -15,11 +15,11 @@ type IOStatsData struct {
 }
 
 func GetInterfaceList() (interfaceList []string, err error) {
-	ioCounters, err := net.IOCounters(true)
+	interfaces, err := net.IOCounters(true)
 	if err != nil {
 		return interfaceList, nil
 	}
-	for _, ifaceBlock := range ioCounters {
+	for _, ifaceBlock := range interfaces {
 		interfaceList = append(interfaceList, ifaceBlock.Name)
 	}
 	sort.Slice(interfaceList, func(i, j int) bool {
@@ -28,14 +28,14 @@ func GetInterfaceList() (interfaceList []string, err error) {
 	return interfaceList, nil
 }
 
-func GetData() (output []IOStatsData, err error) {
+func GetData() (output []IOStatData, err error) {
 	ioCounters, err := net.IOCounters(true)
 	if err != nil {
-		return []IOStatsData{}, err
+		return []IOStatData{}, err
 	}
 
 	for _, ifaceBlock := range ioCounters {
-		output = append(output, IOStatsData{
+		output = append(output, IOStatData{
 			Interface:   ifaceBlock.Name,
 			BytesSent:   float64(ifaceBlock.BytesSent),
 			BytesRecv:   float64(ifaceBlock.BytesRecv),
