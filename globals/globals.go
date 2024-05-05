@@ -10,9 +10,11 @@ type Options struct {
 	InterfaceName  string `short:"i" long:"interface" description:"The name of the network interface to use, e.g., en0" required:"false"`
 	OutputFile     string `short:"o" long:"outfile" description:"Location of the JSON output file - output will not be written to screen" required:"false"`
 	Version        func() `short:"V" long:"version" description:"Print program version"`
-	Args           struct {
-		Stop bool `positional-args:"yes" required:"no"`
-	}
+}
+
+type RuntimeConfig struct {
+	InterfaceName string
+	OutputFile    string
 }
 
 type NetspeedData struct {

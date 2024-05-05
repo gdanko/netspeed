@@ -5,12 +5,12 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gdanko/netspeed/globals"
-	"github.com/mitchellh/go-ps"
+	"github.com/gdanko/netspeed/iostat"
+	"github.com/jessevdk/go-flags"
 	"golang.org/x/sys/unix"
 )
 
@@ -18,66 +18,57 @@ func GetTimestamp() (timestamp uint64) {
 	return uint64(time.Now().Unix())
 }
 
-// Process functions
-func FindProcess(pid int) (process ps.Process, err error) {
-	process, err = ps.FindProcess(int(pid))
+// Options
+func ProcessOptions(opts globals.Options) (err error) {
+	parser := flags.NewParser(&opts, flags.Default)
+	parser.Usage = `--interface <interface_name> --outfile </path/to/output.json>
+  netspeed calculates KiB in/out per second and writes the output to a JSON file.`
+	if _, err := parser.Parse(); err != nil {
+		if flagsErr, ok := err.(*flags.Error); ok && flagsErr.Type == flags.ErrHelp {
+			os.Exit(0)
+		} else {
+			os.Exit(1)
+		}
+	}
+
+	interfaceList, err := iostat.GetInterfaceList()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get a process for pid %d", pid)
+		ExitOnError(err.Error())
+	}
+	globals.SetInterfaceList(interfaceList)
+
+	// if opts.ListInterfaces {
+	// 	output.ListInterfaces()
+	// }
+
+	if opts.InterfaceName == "" {
+		return fmt.Errorf("the required flag `-i, --interface' was not specified")
 	}
 
-	if process == nil {
-		return nil, fmt.Errorf("no process found with the pid %d", pid)
-	}
-	return process, nil
-}
-
-func VerifyProcess() (err error) {
-	if !FileExists(globals.GetPidFile()) {
-		// pidfile doesn't exist
-		return nil
-	}
-
-	contents, err := ReadFile(globals.GetPidFile())
-	if err != nil {
-		// failed to read the file
-		return err
-	}
-
-	pidString := strings.TrimSuffix(string(contents), "\n")
-	pid, _ := strconv.ParseInt(pidString, 10, 64)
-
-	// try to get the process using the pid
-	process, err := FindProcess(int(pid))
-	if err != nil {
-		err = DeleteFile(globals.GetPidFile())
+	if opts.OutputFile != "" {
+		var path = ""
+		if strings.Contains(opts.OutputFile, "/") {
+			path = filepath.Dir(opts.OutputFile)
+		} else {
+			path, err = os.Getwd()
+			if err != nil {
+				return fmt.Errorf("unable to detect the current working directory")
+			}
+		}
+		err = PathExistsAndIsWritable(path)
 		if err != nil {
 			return err
 		}
 	}
 
-	if process.Executable() == "netspeed" {
-		return fmt.Errorf("a process named netspeed with the pid %d is already running", pid)
-	}
+	// Test the interface
+	// if !slices.Contains(interfaceList, globals.GetInterfaceList()) {
+	// 	return fmt.Errorf("the specified interface \"%s\" does not exist", opts.InterfaceName)
+	// }
 
-	return nil
-}
+	globals.SetInterfaceName(opts.InterfaceName)
+	globals.SetOutputFile(opts.OutputFile)
 
-// PID functions
-func GetPidFilename() (pidfile string) {
-	return filepath.Join(globals.GetHomeDir(), ".netspeed.pid")
-}
-
-func CreatePidFile() (err error) {
-	if FileExists(globals.GetPidFile()) {
-		err = VerifyProcess()
-		if err != nil {
-			return err
-		}
-	}
-	err = os.WriteFile(globals.GetPidFile(), []byte(strconv.Itoa(globals.GetPid())), 0644)
-	if err != nil {
-		return err
-	}
 	return nil
 }
 
