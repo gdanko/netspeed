@@ -11,8 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"slices"
-	"strings"
 	"syscall"
 	"time"
 
@@ -23,19 +21,15 @@ import (
 )
 
 type Config struct {
-	InterfaceName  string
-	OutputFile     string
-	ListInterfaces bool
-	PrintVersion   bool
-	InterfaceList  []string
-	Lockfile       string
+	JSON         bool
+	PrintVersion bool
+	Lockfile     string
+	OutputFile   string
 }
 
 type Options struct {
-	ListInterfaces bool   `short:"l" long:"list" description:"Display a list of interfaces and exit"`
-	InterfaceName  string `short:"i" long:"interface" description:"The name of the network interface to use, e.g., en0" required:"false"`
-	OutputFile     string `short:"o" long:"outfile" description:"Location of the JSON output file - output will not be written to screen" required:"false"`
-	PrintVersion   bool   `short:"V" long:"version" description:"Print program version"`
+	JSON         bool `short:"j" long:"json" description:"Save the output to /tmp/netspeed.json instead of to STDOUT.\nOnly the current iteration is saved to file."`
+	PrintVersion bool `short:"V" long:"version" description:"Print program version"`
 }
 
 type NetspeedInterfaceData struct {
@@ -73,16 +67,10 @@ func (c *Config) init(args []string) error {
 		}
 	}
 
-	if len(os.Args) == 1 {
-		parser.WriteHelp(os.Stderr)
-		c.ExitError("")
-	}
-
-	c.InterfaceName = opts.InterfaceName
-	c.OutputFile = opts.OutputFile
-	c.ListInterfaces = opts.ListInterfaces
+	c.JSON = opts.JSON
 	c.PrintVersion = opts.PrintVersion
 	c.Lockfile = filepath.Join(os.TempDir(), "netspeed.lock")
+	c.OutputFile = filepath.Join(os.TempDir(), "netspeed.json")
 
 	return nil
 }
@@ -106,63 +94,12 @@ func (c *Config) CreateLockfile() (err error) {
 	return nil
 }
 
-func (c *Config) PopulateInterfaces() (err error) {
-	c.InterfaceList, err = iostat.GetInterfaceList()
-	if err != nil {
-		return fmt.Errorf("failed to populate the list of interfaces: %s", err)
-	}
-	return nil
-}
-
 func (c *Config) ShowVersion() {
 	fmt.Fprintf(os.Stdout, "netspeed version %s\n", internal.Version(false, true))
 }
 
-func (c *Config) ShowInterfaces() {
-	fmt.Fprintf(os.Stderr, "Available Interfaces:\n")
-	for _, interfaceName := range c.InterfaceList {
-		fmt.Fprintf(os.Stderr, "  %s\n", interfaceName)
-	}
-}
-
 func (c *Config) ValidateOptions() (err error) {
-	err = c.PopulateInterfaces()
-	if err != nil {
-		return err
-	}
 
-	if c.PrintVersion {
-		c.ShowVersion()
-		c.ExitCleanly()
-	}
-
-	if c.ListInterfaces {
-		c.ShowInterfaces()
-		c.ExitCleanly()
-	}
-
-	if c.InterfaceName == "" {
-		return fmt.Errorf("the required flag `-i, --interface' was not specified")
-	}
-
-	if !slices.Contains(c.InterfaceList, c.InterfaceName) {
-		return fmt.Errorf("the interface \"%s\" does not exist", c.InterfaceName)
-	}
-
-	if c.OutputFile != "" {
-		var path = ""
-		if strings.Contains(c.OutputFile, "/") {
-			absolutePath, err := filepath.Abs(c.OutputFile)
-			if err != nil {
-				return fmt.Errorf("failed to determine the absolute path for %s", c.OutputFile)
-			}
-			path = filepath.Dir(absolutePath)
-			err = util.PathExistsAndIsWritable(path)
-			if err != nil {
-				return err
-			}
-		}
-	}
 	return nil
 }
 
@@ -172,7 +109,7 @@ func (c *Config) ProcessOutput(netspeedData NetspeedData) {
 		c.ExitError(err.Error())
 	}
 
-	if c.OutputFile == "" {
+	if !c.JSON {
 		fmt.Fprintln(os.Stdout, string(jsonBytes))
 	} else {
 		err = os.WriteFile(c.OutputFile, jsonBytes, 0644)
@@ -202,6 +139,11 @@ func (c *Config) FindInterface(interfaceName string, interfaceList []iostat.IOSt
 }
 
 func Run(ctx context.Context, c *Config, out io.Writer) error {
+	if c.PrintVersion {
+		c.ShowVersion()
+		c.ExitCleanly()
+	}
+
 	var iostatDataOld = IOStatData{}
 	var iostatDataNew = IOStatData{}
 	var netspeedData = NetspeedData{}
