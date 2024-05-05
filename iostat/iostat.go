@@ -1,8 +1,6 @@
 package iostat
 
 import (
-	"sort"
-
 	"github.com/shirou/gopsutil/net"
 )
 
@@ -12,20 +10,6 @@ type IOStatData struct {
 	BytesSent   float64 `json:"bytes_sent"`
 	PacketsRecv uint64  `json:"packets_recv"`
 	PacketsSent uint64  `json:"packets_sent"`
-}
-
-func GetInterfaceList() (interfaceList []string, err error) {
-	interfaces, err := net.IOCounters(true)
-	if err != nil {
-		return interfaceList, nil
-	}
-	for _, ifaceBlock := range interfaces {
-		interfaceList = append(interfaceList, ifaceBlock.Name)
-	}
-	sort.Slice(interfaceList, func(i, j int) bool {
-		return interfaceList[i] < interfaceList[j]
-	})
-	return interfaceList, nil
 }
 
 func GetData() (output []IOStatData, err error) {
