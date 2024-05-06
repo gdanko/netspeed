@@ -75,11 +75,13 @@ func (c *Config) init(args []string) error {
 }
 
 func (c *Config) ExitError(errorMessage string) {
+	c.CleanUp()
 	fmt.Fprintf(os.Stderr, "%s\n", errorMessage)
 	os.Exit(1)
 }
 
 func (c *Config) ExitCleanly() {
+	c.CleanUp()
 	os.Exit(0)
 }
 
@@ -170,7 +172,6 @@ func Run(ctx context.Context, c *Config, out io.Writer) error {
 		select {
 		case <-ctx.Done():
 			return nil
-		// case <-time.Tick(c.Tick):
 		default:
 			// Clear out New at each iteration
 			netspeedData = NetspeedData{
@@ -179,29 +180,37 @@ func Run(ctx context.Context, c *Config, out io.Writer) error {
 
 			data, err := iostat.GetData()
 			if err != nil {
-				c.ExitError(err.Error())
+				// breaking out here will cause disruption for one iteration but
+				// should normalize iterself naturally
+				break
 			}
 			iostatDataNew.Interfaces = data
 
 			for _, iostatBlock := range iostatDataNew.Interfaces {
+				var foundInOld, foundInNew = false, false
+
 				interfaceName := iostatBlock.Interface
 				interfaceOld, err := c.FindInterface(interfaceName, iostatDataOld.Interfaces)
-				if err != nil {
-					c.ExitError(err.Error())
+				if err == nil {
+					foundInOld = true
 				}
+				foundInOld = true
 
 				interfaceNew, err := c.FindInterface(interfaceName, iostatDataNew.Interfaces)
-				if err != nil {
-					c.ExitError(err.Error())
+				if err == nil {
+					foundInNew = true
 				}
 
-				netspeedData.Interfaces = append(netspeedData.Interfaces, NetspeedInterfaceData{
-					Interface:   interfaceNew.Interface,
-					BytesSent:   interfaceNew.BytesSent - interfaceOld.BytesSent,
-					BytesRecv:   interfaceNew.BytesRecv - interfaceOld.BytesRecv,
-					PacketsSent: interfaceNew.PacketsSent - interfaceOld.PacketsSent,
-					PacketsRecv: interfaceNew.PacketsRecv - interfaceOld.PacketsRecv,
-				})
+				// Only add the block if the interface name was found in both old and new blocks
+				if foundInOld && foundInNew {
+					netspeedData.Interfaces = append(netspeedData.Interfaces, NetspeedInterfaceData{
+						Interface:   interfaceNew.Interface,
+						BytesSent:   interfaceNew.BytesSent - interfaceOld.BytesSent,
+						BytesRecv:   interfaceNew.BytesRecv - interfaceOld.BytesRecv,
+						PacketsSent: interfaceNew.PacketsSent - interfaceOld.PacketsSent,
+						PacketsRecv: interfaceNew.PacketsRecv - interfaceOld.PacketsRecv,
+					})
+				}
 			}
 
 			c.ProcessOutput(netspeedData)
@@ -233,7 +242,6 @@ func main() {
 					fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 					os.Exit(1)
 				}
-				// cancel()
 				os.Exit(1)
 			case syscall.SIGHUP:
 				log.Printf("Got SIGHUP, reloading.")
