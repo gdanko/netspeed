@@ -10,7 +10,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -34,8 +33,8 @@ type Options struct {
 
 type NetspeedInterfaceData struct {
 	Interface   string  `json:"interface"`
-	KBytesRecv  float64 `json:"kbytes_recv"`
-	KBytesSent  float64 `json:"kbytes_sent"`
+	BytesRecv   float64 `json:"bytes_recv"`
+	BytesSent   float64 `json:"bytes_sent"`
 	PacketsRecv uint64  `json:"packets_recv"`
 	PacketsSent uint64  `json:"packets_sent"`
 }
@@ -58,7 +57,7 @@ func (c *Config) init(args []string) error {
 	opts = Options{}
 	parser = flags.NewParser(&opts, flags.Default)
 	parser.Usage = `[-j, --json] [-V, --version] 
-  netspeed prints kilobytes in/out per second and packets sent/received per second for all interfaces`
+  netspeed prints bytes in/out per second and packets sent/received per second for all interfaces`
 	if _, err := parser.Parse(); err != nil {
 		if flagsErr, ok := err.(*flags.Error); ok && flagsErr.Type == flags.ErrHelp {
 			os.Exit(0)
@@ -69,8 +68,8 @@ func (c *Config) init(args []string) error {
 
 	c.JSON = opts.JSON
 	c.PrintVersion = opts.PrintVersion
-	c.Lockfile = filepath.Join(os.TempDir(), "netspeed.lock")
-	c.OutputFile = filepath.Join(os.TempDir(), "netspeed.json")
+	c.Lockfile = "/tmp/netspeed.lock"
+	c.OutputFile = "/tmp/netspeed.json"
 
 	return nil
 }
@@ -198,8 +197,8 @@ func Run(ctx context.Context, c *Config, out io.Writer) error {
 
 				netspeedData.Interfaces = append(netspeedData.Interfaces, NetspeedInterfaceData{
 					Interface:   interfaceNew.Interface,
-					KBytesSent:  (interfaceNew.BytesSent - interfaceOld.BytesSent) / 1024,
-					KBytesRecv:  (interfaceNew.BytesRecv - interfaceOld.BytesRecv) / 1024,
+					BytesSent:   interfaceNew.BytesSent - interfaceOld.BytesSent,
+					BytesRecv:   interfaceNew.BytesRecv - interfaceOld.BytesRecv,
 					PacketsSent: interfaceNew.PacketsSent - interfaceOld.PacketsSent,
 					PacketsRecv: interfaceNew.PacketsRecv - interfaceOld.PacketsRecv,
 				})
