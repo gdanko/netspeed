@@ -6,8 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -17,13 +15,19 @@ import (
 	"github.com/gdanko/netspeed/iostat"
 	"github.com/gdanko/netspeed/util"
 	flags "github.com/jessevdk/go-flags"
+	"github.com/sirupsen/logrus"
+	prefixed "github.com/x-cray/logrus-prefixed-formatter"
 )
 
-type Config struct {
-	JSON         bool
-	PrintVersion bool
-	Lockfile     string
-	OutputFile   string
+type Netspeed struct {
+	JSON          bool
+	PrintVersion  bool
+	Lockfile      string
+	OutputFile    string
+	StartTime     uint64
+	Logger        *logrus.Logger
+	Logfile       string
+	LogfileHandle *os.File
 }
 
 type Options struct {
@@ -42,14 +46,17 @@ type NetspeedInterfaceData struct {
 type NetspeedData struct {
 	Timestamp  uint64                  `json:"timestamp"`
 	Interfaces []NetspeedInterfaceData `json:"interfaces"`
+	StartTime  uint64                  `json:"start_time"`
+	RunTime    uint64                  `json:"run_time"`
 }
 
 type IOStatData struct {
 	Interfaces []iostat.IOStatData `json:"interfaces"`
 }
 
-func (c *Config) init(args []string) error {
+func (n *Netspeed) init(args []string) error {
 	var (
+		err    error
 		opts   Options
 		parser *flags.Parser
 	)
@@ -66,71 +73,85 @@ func (c *Config) init(args []string) error {
 		}
 	}
 
-	c.JSON = opts.JSON
-	c.PrintVersion = opts.PrintVersion
-	c.Lockfile = "/tmp/netspeed.lock"
-	c.OutputFile = "/tmp/netspeed.json"
+	n.JSON = opts.JSON
+	n.PrintVersion = opts.PrintVersion
+	n.Lockfile = "/tmp/netspeed.lock"
+	n.OutputFile = "/tmp/netspeed.json"
+	n.StartTime = util.GetTimestamp()
+	n.Logfile = "/tmp/netspeed.log"
+	n.Logger = logrus.New()
+
+	n.LogfileHandle, err = os.OpenFile(n.Logfile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		return fmt.Errorf("failed to create the log file handle: %s", err.Error())
+	}
+
+	n.Logger.SetFormatter(&prefixed.TextFormatter{
+		DisableColors:   true,
+		ForceFormatting: true,
+		FullTimestamp:   true,
+		TimestampFormat: "2006-01-02 15:04:05",
+	})
+	n.Logger.SetOutput(n.LogfileHandle)
+	n.Logger.SetReportCaller(true)
+	n.Logger.Info("Starting")
 
 	return nil
 }
 
-func (c *Config) ExitError(errorMessage string) {
-	c.CleanUp()
-	fmt.Fprintf(os.Stderr, "%s\n", errorMessage)
+func (n *Netspeed) ExitError(errorMessage error) {
+	n.CleanUp()
+	n.Logger.Error(errorMessage.Error())
+	n.LogfileHandle.Close()
 	os.Exit(1)
 }
 
-func (c *Config) ExitCleanly() {
-	c.CleanUp()
+func (n *Netspeed) ExitCleanly() {
+	n.CleanUp()
+	n.LogfileHandle.Close()
 	os.Exit(0)
 }
 
-func (c *Config) CreateLockfile() (err error) {
-	f, err := os.Create(c.Lockfile)
+func (n *Netspeed) CreateLockfile() (err error) {
+	f, err := os.Create(n.Lockfile)
 	if err != nil {
-		return fmt.Errorf("failed to create the lockfile \"%s\"", c.Lockfile)
+		return fmt.Errorf("failed to create the lockfile \"%s\"", n.Lockfile)
 	}
 	defer f.Close()
 
 	return nil
 }
 
-func (c *Config) ShowVersion() {
+func (n *Netspeed) ShowVersion() {
 	fmt.Fprintf(os.Stdout, "netspeed version %s\n", internal.Version(false, true))
 }
 
-func (c *Config) ValidateOptions() (err error) {
-
-	return nil
-}
-
-func (c *Config) ProcessOutput(netspeedData NetspeedData) {
+func (n *Netspeed) ProcessOutput(netspeedData NetspeedData) {
 	jsonBytes, err := json.Marshal(netspeedData)
 	if err != nil {
-		c.ExitError(err.Error())
+		n.ExitError(err)
 	}
 
-	if !c.JSON {
+	if !n.JSON {
 		fmt.Fprintln(os.Stdout, string(jsonBytes))
 	} else {
-		err = os.WriteFile(c.OutputFile, jsonBytes, 0644)
+		err = os.WriteFile(n.OutputFile, jsonBytes, 0644)
 		if err != nil {
-			c.ExitError(err.Error())
+			n.ExitError(err)
 		}
 	}
 }
 
-func (c *Config) CleanUp() (err error) {
-	for _, filename := range []string{c.OutputFile, c.Lockfile} {
-		err = util.DeleteFile(filename)
+func (n *Netspeed) CleanUp() {
+	for _, filename := range []string{n.OutputFile, n.Lockfile} {
+		err := util.DeleteFile(filename)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+			n.Logger.Warn(err.Error())
 		}
 	}
-	return nil
 }
 
-func (c *Config) FindInterface(interfaceName string, interfaceList []iostat.IOStatData) (iostatEntry iostat.IOStatData, err error) {
+func (n *Netspeed) FindInterface(interfaceName string, interfaceList []iostat.IOStatData) (iostatEntry iostat.IOStatData, err error) {
 	for _, iostatEntry = range interfaceList {
 		if interfaceName == iostatEntry.Interface {
 			return iostatEntry, nil
@@ -139,31 +160,29 @@ func (c *Config) FindInterface(interfaceName string, interfaceList []iostat.IOSt
 	return iostat.IOStatData{}, fmt.Errorf("the interface \"%s\" was not found in this block", interfaceName)
 }
 
-func Run(ctx context.Context, c *Config, out io.Writer) error {
-	if c.PrintVersion {
-		c.ShowVersion()
-		c.ExitCleanly()
+func Run(ctx context.Context, n *Netspeed) error {
+	if n.PrintVersion {
+		n.ShowVersion()
+		n.ExitCleanly()
 	}
 
 	var iostatDataOld = IOStatData{}
 	var iostatDataNew = IOStatData{}
 	var netspeedData = NetspeedData{}
 
-	if util.FileExists(c.Lockfile) {
-		return fmt.Errorf("the lockfile \"%s\" already exists - the program is probably already running", c.Lockfile)
+	if util.FileExists(n.Lockfile) {
+		return fmt.Errorf("the lockfile \"%s\" already exists - the program is probably already running", n.Lockfile)
 	}
 
-	err := c.CreateLockfile()
+	err := n.CreateLockfile()
 	if err != nil {
 		return err
 	}
 
-	log.SetOutput(out)
-
 	// Get the first sample
 	data, err := iostat.GetData()
 	if err != nil {
-		c.ExitError(err.Error())
+		return err
 	}
 	iostatDataOld.Interfaces = data
 	time.Sleep(1 * time.Second)
@@ -174,8 +193,11 @@ func Run(ctx context.Context, c *Config, out io.Writer) error {
 			return nil
 		default:
 			// Clear out New at each iteration
+			currentTimestamp := util.GetTimestamp()
 			netspeedData = NetspeedData{
-				Timestamp: util.GetTimestamp(),
+				Timestamp: currentTimestamp,
+				StartTime: n.StartTime,
+				RunTime:   currentTimestamp - n.StartTime,
 			}
 
 			data, err := iostat.GetData()
@@ -187,18 +209,20 @@ func Run(ctx context.Context, c *Config, out io.Writer) error {
 			iostatDataNew.Interfaces = data
 
 			for _, iostatBlock := range iostatDataNew.Interfaces {
-				var foundInOld, foundInNew = false, false
+				var foundInOld, foundInNew = true, true
 
 				interfaceName := iostatBlock.Interface
-				interfaceOld, err := c.FindInterface(interfaceName, iostatDataOld.Interfaces)
-				if err == nil {
-					foundInOld = true
+				interfaceOld, err := n.FindInterface(interfaceName, iostatDataOld.Interfaces)
+				if err != nil {
+					n.Logger.Warnf("interface \"%s\" not found in the old data set", interfaceName)
+					foundInOld = false
 				}
 				foundInOld = true
 
-				interfaceNew, err := c.FindInterface(interfaceName, iostatDataNew.Interfaces)
-				if err == nil {
-					foundInNew = true
+				interfaceNew, err := n.FindInterface(interfaceName, iostatDataNew.Interfaces)
+				if err != nil {
+					n.Logger.Warnf("interface \"%s\" not found in the new data set", interfaceName)
+					foundInNew = false
 				}
 
 				// Only add the block if the interface name was found in both old and new blocks
@@ -213,7 +237,7 @@ func Run(ctx context.Context, c *Config, out io.Writer) error {
 				}
 			}
 
-			c.ProcessOutput(netspeedData)
+			n.ProcessOutput(netspeedData)
 
 			iostatDataOld.Interfaces = iostatDataNew.Interfaces
 			time.Sleep(1 * time.Second)
@@ -224,7 +248,7 @@ func Run(ctx context.Context, c *Config, out io.Writer) error {
 func main() {
 	var err error
 
-	c := &Config{}
+	n := &Netspeed{}
 	ctx := context.Background()
 	ctx, cancel := context.WithCancel(ctx)
 
@@ -235,26 +259,19 @@ func main() {
 		select {
 		case s := <-signalChan:
 			switch s {
-			case syscall.SIGINT, syscall.SIGTERM:
-				log.Printf("Got SIGINT/SIGTERM, exiting.")
-				err = c.CleanUp()
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-					os.Exit(1)
-				}
-				os.Exit(1)
+			case syscall.SIGINT:
+				n.Logger.Info("Got SIGINT, exiting.")
+				n.ExitCleanly()
+			case syscall.SIGTERM:
+				n.Logger.Info("Got SIGTERM, exiting.")
+				n.ExitCleanly()
 			case syscall.SIGHUP:
-				log.Printf("Got SIGHUP, reloading.")
-				c.init(os.Args)
+				n.Logger.Info("Got SIGHUP, reloading.")
+				n.init(os.Args)
 			}
 		case <-ctx.Done():
-			log.Printf("Done.")
-			err = c.CleanUp()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-				os.Exit(1)
-			}
-			os.Exit(1)
+			n.Logger.Info("Exiting normally.")
+			n.ExitCleanly()
 		}
 	}()
 
@@ -262,17 +279,12 @@ func main() {
 		cancel()
 	}()
 
-	err = c.init(os.Args)
+	err = n.init(os.Args)
 	if err != nil {
-		c.ExitError(err.Error())
+		n.ExitError(err)
 	}
 
-	err = c.ValidateOptions()
-	if err != nil {
-		c.ExitError(err.Error())
-	}
-
-	if err := Run(ctx, c, os.Stdout); err != nil {
-		c.ExitError(err.Error())
+	if err := Run(ctx, n); err != nil {
+		n.ExitError(err)
 	}
 }
